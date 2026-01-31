@@ -8,6 +8,9 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <ctype.h>
+#include <sys/stat.h>
+
 
 #define BUFFER_SIZE 512
 #define EXIT_KEYWORD "EXIT"
@@ -27,6 +30,22 @@ int socket_fd;
 
 // message receiver from other clients will be present inside this file
 char* fileName;
+
+void sanitize_filename(char *name) {
+    for (int i = 0; name[i]; i++) {
+        if (!(isalnum(name[i]) || name[i] == '.' || name[i] == '_')) {
+            name[i] = '_';
+        }
+    }
+}
+
+bool is_safe_filename(const char *name) {
+    if (strstr(name, "..")) return false;
+    if (strchr(name, '/')) return false;
+    if (strchr(name, '\\')) return false;
+    return true;
+}
+
 
 void encrypt_message(char* input, char* encrypted) {
     // to send encrypted message to server
@@ -171,14 +190,44 @@ void decrypt_message(char* input, char* decrypted) {
     else {
         // if input was file type, open the file <file name> and add the content
         // inform the receiver that a file was sent by @username
-        FILE* file = fopen(fileName, "a+");
-        fprintf(file, "\n");
-        for(int k = revIndex - 1; k >= 0; k--) {
-            fprintf(file, "%c", reversed[k]);
+        // Validate filename
+        if (!is_safe_filename(fileName)) {
+            strcat(decrypted, "Received a file with unsafe filename. File rejected.");
+            return;
+       }
+        sanitize_filename(fileName);
+
+        // Build final filename
+        char final_path[512];
+        time_t now = time(NULL);
+        char message[512];
+
+        snprintf(final_path, sizeof(final_path),
+                "received_files/%s_%ld_%s",
+                decrypted, now, fileName);
+
+        // Replace spaces from username prefix if any
+        for (int i = 0; final_path[i]; i++) {
+            if (final_path[i] == ' ') final_path[i] = '_';
+        }
+
+        // Write file safely
+        FILE* file = fopen(final_path, "w");
+        if (!file) {
+            perror("File creation failed");
+            return;
+        }
+
+        for (int k = revIndex - 1; k >= 0; k--) {
+            fputc(reversed[k], file);
         }
         fclose(file);
+        // Inform user
+        char msg[512];
+        snprintf(msg, sizeof(msg),
+                "Received file saved as %s", final_path);
+        strcat(decrypted, msg);
 
-        char message[512];
         memset(message, 0, sizeof(message));
         snprintf(message, sizeof(message), "I sent you a file named %s\n", fileName);
         strcat(decrypted, message);
@@ -237,6 +286,8 @@ int main(int argc, char* argv[]) {
     int port_no;
     struct sockaddr_in server_address;
     struct hostent* server;
+    mkdir("received_files", 0755);
+    mkdir("chat_logs", 0755);
     char* buffer = (char*)malloc(BUFFER_SIZE);
     char* encrypt = (char*)malloc(BUFFER_SIZE * 3);
 
@@ -274,10 +325,10 @@ int main(int argc, char* argv[]) {
     //opening the file with client name to see the message from other clients
     fileName = (char*)malloc(strlen(argv[3]) + 5);
     if(!fileName) error("Memory allocation failed");
-    snprintf(fileName, strlen(argv[3]) + 5, "%s.txt", argv[3]);
+    snprintf(fileName, strlen(argv[3]) + 20, "chat_logs/%s.log", argv[3]);
     printf("fileName: %s\n", fileName);
 
-    FILE* chatPad = fopen(fileName, "a+");
+    FILE* chatPad = fopen(fileName, "w");
     if(!chatPad) error("ERROR opening chat file");
 
     // sending name of client to server
