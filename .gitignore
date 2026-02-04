@@ -1,5 +1,9 @@
 *.txt
+*.o
+*.out
 client
 clientThread
 server
 serverThread
+chat_logs/
+received_files/
