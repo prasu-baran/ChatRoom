@@ -39,6 +39,16 @@ void sanitize_filename(char *name) {
     }
 }
 
+void extract_sender(const char *msg, char *sender) {
+    int i = 0;
+    while (msg[i] && msg[i] != '[' && i < 49) {
+        sender[i] = msg[i];
+        i++;
+    }
+    sender[i] = '\0';
+}
+
+
 bool is_safe_filename(const char *name) {
     if (strstr(name, "..")) return false;
     if (strchr(name, '/')) return false;
@@ -106,21 +116,26 @@ void encrypt_message(char* input, char* encrypted) {
         }
         encrypted[pos++] = ' ';
         
-        char* temp = (char*)realloc(input, sizeof(char) * 1024);
-        if(temp == NULL) {
-            fprintf(stderr, "Memory reallocation failed\n");
-            return;
-        }
-        input = temp;
-        input[last++] = ' ';
-
-        // open the file "fileName" and add the file content to the encrpt message which will be encrypted
+        char fileData[1024] = {0};
         FILE* file = fopen(fileName, "r");
-        char fileData[1024];
+        if (!file) {
+            perror("File open failed");
+            free(fileName);
+            return;
+}
+
         fgets(fileData, sizeof(fileData), file);
-        
         fclose(file);
-        strcat(input, fileData);
+
+        // Encrypt fileData instead of modifying input
+        for (int i = strlen(fileData) - 1; i >= 0; i--) {
+            pos += sprintf(encrypted + pos, "%03d", (unsigned char)fileData[i]);
+        }
+
+        free(fileName);
+        encrypted[pos] = '\0';
+        return;
+
     }
     
     // encrypt the message or fileContent
@@ -348,7 +363,7 @@ int main(int argc, char* argv[]) {
         fflush(chatPad); 
 
         // encrypting the message of client and then sending the encrypted message to server
-        memset(encrypt, 0, sizeof(encrypt));
+        memset(encrypt, 0, BUFFER_SIZE * 3);
         encrypt_message(buffer, encrypt);
         if(write(socket_fd, encrypt, strlen(encrypt)) < 0) error("ERROR writing to socket");
     }
